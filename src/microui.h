@@ -18,7 +18,7 @@
 #define MU_LAYOUTSTACK_SIZE     16
 #define MU_CONTAINERPOOL_SIZE   48
 #define MU_TREENODEPOOL_SIZE    48
-#define MU_MAX_WIDTHS           16
+#define MU_MAX_WIDTHS           64
 #define MU_REAL                 float
 #define MU_REAL_FMT             "%.3g"
 #define MU_SLIDER_FMT           "%.2f"
@@ -28,6 +28,10 @@
 #define mu_min(a, b)            ((a) < (b) ? (a) : (b))
 #define mu_max(a, b)            ((a) > (b) ? (a) : (b))
 #define mu_clamp(x, a, b)       mu_min(b, mu_max(a, x))
+
+#define unused(x)               ((void) (x))
+
+#include <stdint.h>
 
 enum {
   MU_CLIP_PART = 1,
@@ -40,7 +44,8 @@ enum {
   MU_COMMAND_RECT,
   MU_COMMAND_TEXT,
   MU_COMMAND_ICON,
-  MU_COMMAND_MAX
+  MU_COMMAND_MAX,
+  MU_COMMAND_INPUT
 };
 
 enum {
@@ -88,7 +93,9 @@ enum {
   MU_OPT_AUTOSIZE     = (1 << 9),
   MU_OPT_POPUP        = (1 << 10),
   MU_OPT_CLOSED       = (1 << 11),
-  MU_OPT_EXPANDED     = (1 << 12)
+  MU_OPT_EXPANDED     = (1 << 12),
+  MU_OPT_NOBORDER     = (1 << 13),
+  MU_OPT_ANCHORED     = (1 << 14)
 };
 
 enum {
@@ -122,6 +129,7 @@ typedef struct { mu_BaseCommand base; mu_Rect rect; } mu_ClipCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; mu_Color color; } mu_RectCommand;
 typedef struct { mu_BaseCommand base; mu_Font font; mu_Vec2 pos; mu_Color color; char str[1]; } mu_TextCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; int id; mu_Color color; } mu_IconCommand;
+typedef struct { mu_BaseCommand base; uint8_t status; } mu_InptCommand;
 
 typedef union {
   int type;
@@ -131,6 +139,7 @@ typedef union {
   mu_RectCommand rect;
   mu_TextCommand text;
   mu_IconCommand icon;
+  mu_InptCommand input;
 } mu_Command;
 
 typedef struct {
@@ -160,12 +169,12 @@ typedef struct {
 typedef struct {
   mu_Font font;
   mu_Vec2 size;
-  int padding;
-  int spacing;
-  int indent;
-  int title_height;
-  int scrollbar_size;
-  int thumb_size;
+  uint8_t padding;
+  uint8_t spacing;
+  uint8_t indent;
+  uint8_t title_height;
+  uint8_t scrollbar_size;
+  uint8_t thumb_size;
   mu_Color colors[MU_COLOR_MAX];
 } mu_Style;
 
@@ -173,7 +182,7 @@ struct mu_Context {
   /* callbacks */
   int (*text_width)(mu_Font font, const char *str, int len);
   int (*text_height)(mu_Font font);
-  void (*draw_frame)(mu_Context *ctx, mu_Rect rect, int colorid);
+  void (*draw_frame)(mu_Context *ctx, mu_Rect rect, int colorid, int draw_border);
   /* core state */
   mu_Style _style;
   mu_Style *style;

@@ -25,8 +25,6 @@
 #include <string.h>
 #include "microui.h"
 
-#define unused(x) ((void) (x))
-
 #define expect(x) do {                                               \
     if (!(x)) {                                                      \
       fprintf(stderr, "Fatal error: %s:%d: assertion '%s' failed\n", \
@@ -51,17 +49,17 @@ static mu_Rect unclipped_rect = { 0, 0, 0x1000000, 0x1000000 };
 
 static mu_Style default_style = {
   /* font | size | padding | spacing | indent */
-  NULL, { 68, 10 }, 5, 4, 24,
+  .font = NULL, .size = { 68, 10 }, .padding = 5, .spacing = 4, .indent = 24,
   /* title_height | scrollbar_size | thumb_size */
-  24, 12, 8,
+  .title_height = 24, .scrollbar_size = 6, .thumb_size = 6,
   {
     { 230, 230, 230, 255 }, /* MU_COLOR_TEXT */
     { 25,  25,  25,  255 }, /* MU_COLOR_BORDER */
-    { 50,  50,  50,  255 }, /* MU_COLOR_WINDOWBG */
+    { 45,  45,  45,  255 }, /* MU_COLOR_WINDOWBG */
     { 25,  25,  25,  255 }, /* MU_COLOR_TITLEBG */
     { 240, 240, 240, 255 }, /* MU_COLOR_TITLETEXT */
     { 0,   0,   0,   0   }, /* MU_COLOR_PANELBG */
-    { 75,  75,  75,  255 }, /* MU_COLOR_BUTTON */
+    { 65,  65,  65,  255 }, /* MU_COLOR_BUTTON */
     { 95,  95,  95,  255 }, /* MU_COLOR_BUTTONHOVER */
     { 115, 115, 115, 255 }, /* MU_COLOR_BUTTONFOCUS */
     { 30,  30,  30,  255 }, /* MU_COLOR_BASE */
@@ -115,13 +113,13 @@ static int rect_overlaps_vec2(mu_Rect r, mu_Vec2 p) {
 }
 
 
-static void draw_frame(mu_Context *ctx, mu_Rect rect, int colorid) {
+static void draw_frame(mu_Context *ctx, mu_Rect rect, int colorid, int draw_border) {
   mu_draw_rect(ctx, rect, ctx->style->colors[colorid]);
   if (colorid == MU_COLOR_SCROLLBASE  ||
       colorid == MU_COLOR_SCROLLTHUMB ||
       colorid == MU_COLOR_TITLEBG) { return; }
   /* draw border */
-  if (ctx->style->colors[MU_COLOR_BORDER].a) {
+  if (ctx->style->colors[MU_COLOR_BORDER].a && draw_border) {
     mu_draw_box(ctx, expand_rect(rect, 1), ctx->style->colors[MU_COLOR_BORDER]);
   }
 }
@@ -427,6 +425,10 @@ void mu_input_text(mu_Context *ctx, const char *text) {
 mu_Command* mu_push_command(mu_Context *ctx, int type, int size) {
   mu_Command *cmd = (mu_Command*) (ctx->command_list.items + ctx->command_list.idx);
   expect(ctx->command_list.idx + size < MU_COMMANDLIST_SIZE);
+  
+  // Need to pad to the next multiple of 8 to respect alignment requirements.
+  // https://github.com/rxi/microui/pull/67/commits/654a0b0396a57b50206bd5868e8a18341819765f
+  size = (size+7) & -8;
   cmd->base.type = type;
   cmd->base.size = size;
   ctx->command_list.idx += size;
@@ -455,6 +457,11 @@ static mu_Command* push_jump(mu_Context *ctx, mu_Command *dst) {
   return cmd;
 }
 
+static mu_Command *push_input(mu_Context *ctx, uint8_t status) {
+  mu_Command *cmd = mu_push_command(ctx, MU_COMMAND_INPUT, sizeof(MU_COMMAND_INPUT));
+  cmd->input.status = status;
+  return cmd;
+}
 
 void mu_set_clip(mu_Context *ctx, mu_Rect rect) {
   mu_Command *cmd;
@@ -644,8 +651,8 @@ void mu_draw_control_frame(mu_Context *ctx, mu_Id id, mu_Rect rect,
   int colorid, int opt)
 {
   if (opt & MU_OPT_NOFRAME) { return; }
-  colorid += (ctx->focus == id) ? 2 : (ctx->hover == id) ? 1 : 0;
-  ctx->draw_frame(ctx, rect, colorid);
+  colorid += (opt & MU_OPT_NOINTERACT) ? 0 : (ctx->focus == id) ? 2 : (ctx->hover == id) ? 1 : 0;
+  ctx->draw_frame(ctx, rect, colorid, opt & MU_OPT_NOBORDER ? 0 : 1);
 }
 
 
@@ -776,6 +783,8 @@ int mu_textbox_raw(mu_Context *ctx, char *buf, int bufsz, mu_Id id, mu_Rect r,
   mu_update_control(ctx, id, r, opt | MU_OPT_HOLDFOCUS);
 
   if (ctx->focus == id) {
+    push_input(ctx, 1);
+
     /* handle text input */
     int len = strlen(buf);
     int n = mu_min(bufsz - len - 1, (int) strlen(ctx->input_text));
@@ -795,6 +804,7 @@ int mu_textbox_raw(mu_Context *ctx, char *buf, int bufsz, mu_Id id, mu_Rect r,
     /* handle return */
     if (ctx->key_pressed & MU_KEY_RETURN) {
       mu_set_focus(ctx, 0);
+      push_input(ctx, 0);
       res |= MU_RES_SUBMIT;
     }
   }
@@ -883,7 +893,7 @@ int mu_slider_ex(mu_Context *ctx, mu_Real *value, mu_Real low, mu_Real high,
   x = (v - low) * (base.w - w) / (high - low);
   thumb = mu_rect(base.x + x, base.y, w, base.h);
   mu_draw_control_frame(ctx, id, thumb, MU_COLOR_BUTTON, opt);
-  /* draw text  */
+  /* draw text */
   sprintf(buf, fmt, v);
   mu_draw_control_text(ctx, buf, base, MU_COLOR_TEXT, opt);
 
@@ -949,7 +959,7 @@ static int header(mu_Context *ctx, const char *label, int istreenode, int opt) {
 
   /* draw */
   if (istreenode) {
-    if (ctx->hover == id) { ctx->draw_frame(ctx, r, MU_COLOR_BUTTONHOVER); }
+    if (ctx->hover == id) { ctx->draw_frame(ctx, r, MU_COLOR_BUTTONHOVER, 1); }
   } else {
     mu_draw_control_frame(ctx, id, r, MU_COLOR_BUTTON, 0);
   }
@@ -1008,11 +1018,11 @@ void mu_end_treenode(mu_Context *ctx) {
       cnt->scroll.y = mu_clamp(cnt->scroll.y, 0, maxscroll);                \
                                                                             \
       /* draw base and thumb */                                             \
-      ctx->draw_frame(ctx, base, MU_COLOR_SCROLLBASE);                      \
+      ctx->draw_frame(ctx, base, MU_COLOR_SCROLLBASE, 1);                      \
       thumb = base;                                                         \
       thumb.h = mu_max(ctx->style->thumb_size, base.h * b->h / cs.y);       \
       thumb.y += cnt->scroll.y * (base.h - thumb.h) / maxscroll;            \
-      ctx->draw_frame(ctx, thumb, MU_COLOR_SCROLLTHUMB);                    \
+      ctx->draw_frame(ctx, thumb, MU_COLOR_SCROLLTHUMB, 1);                 \
                                                                             \
       /* set this as the scroll_target (will get scrolled on mousewheel) */ \
       /* if the mouse is over it */                                         \
@@ -1093,21 +1103,21 @@ int mu_begin_window_ex(mu_Context *ctx, const char *title, mu_Rect rect, int opt
 
   /* draw frame */
   if (~opt & MU_OPT_NOFRAME) {
-    ctx->draw_frame(ctx, rect, MU_COLOR_WINDOWBG);
+    ctx->draw_frame(ctx, rect, MU_COLOR_WINDOWBG, ~opt & MU_OPT_NOBORDER);
   }
 
   /* do title bar */
   if (~opt & MU_OPT_NOTITLE) {
     mu_Rect tr = rect;
     tr.h = ctx->style->title_height;
-    ctx->draw_frame(ctx, tr, MU_COLOR_TITLEBG);
+    ctx->draw_frame(ctx, tr, MU_COLOR_TITLEBG, 1);
 
     /* do title text */
     if (~opt & MU_OPT_NOTITLE) {
-      mu_Id id = mu_get_id(ctx, "!title", 6);
-      mu_update_control(ctx, id, tr, opt);
+      mu_Id l_id = mu_get_id(ctx, "!title", 6);
+      mu_update_control(ctx, l_id, tr, opt);
       mu_draw_control_text(ctx, title, tr, MU_COLOR_TITLETEXT, opt);
-      if (id == ctx->focus && ctx->mouse_down == MU_MOUSE_LEFT) {
+      if (l_id == ctx->focus && ctx->mouse_down == MU_MOUSE_LEFT && ~opt & MU_OPT_ANCHORED) {
         cnt->rect.x += ctx->mouse_delta.x;
         cnt->rect.y += ctx->mouse_delta.y;
       }
@@ -1117,12 +1127,12 @@ int mu_begin_window_ex(mu_Context *ctx, const char *title, mu_Rect rect, int opt
 
     /* do `close` button */
     if (~opt & MU_OPT_NOCLOSE) {
-      mu_Id id = mu_get_id(ctx, "!close", 6);
+      mu_Id l_id = mu_get_id(ctx, "!close", 6);
       mu_Rect r = mu_rect(tr.x + tr.w - tr.h, tr.y, tr.h, tr.h);
       tr.w -= r.w;
       mu_draw_icon(ctx, MU_ICON_CLOSE, r, ctx->style->colors[MU_COLOR_TITLETEXT]);
-      mu_update_control(ctx, id, r, opt);
-      if (ctx->mouse_pressed == MU_MOUSE_LEFT && id == ctx->focus) {
+      mu_update_control(ctx, l_id, r, opt);
+      if (ctx->mouse_pressed == MU_MOUSE_LEFT && l_id == ctx->focus) {
         cnt->open = 0;
       }
     }
@@ -1133,10 +1143,10 @@ int mu_begin_window_ex(mu_Context *ctx, const char *title, mu_Rect rect, int opt
   /* do `resize` handle */
   if (~opt & MU_OPT_NORESIZE) {
     int sz = ctx->style->title_height;
-    mu_Id id = mu_get_id(ctx, "!resize", 7);
+    mu_Id l_id = mu_get_id(ctx, "!resize", 7);
     mu_Rect r = mu_rect(rect.x + rect.w - sz, rect.y + rect.h - sz, sz, sz);
-    mu_update_control(ctx, id, r, opt);
-    if (id == ctx->focus && ctx->mouse_down == MU_MOUSE_LEFT) {
+    mu_update_control(ctx, l_id, r, opt);
+    if (l_id == ctx->focus && ctx->mouse_down == MU_MOUSE_LEFT) {
       cnt->rect.w = mu_max(96, cnt->rect.w + ctx->mouse_delta.x);
       cnt->rect.h = mu_max(64, cnt->rect.h + ctx->mouse_delta.y);
     }
@@ -1194,7 +1204,7 @@ void mu_begin_panel_ex(mu_Context *ctx, const char *name, int opt) {
   cnt = get_container(ctx, ctx->last_id, opt);
   cnt->rect = mu_layout_next(ctx);
   if (~opt & MU_OPT_NOFRAME) {
-    ctx->draw_frame(ctx, cnt->rect, MU_COLOR_PANELBG);
+    ctx->draw_frame(ctx, cnt->rect, MU_COLOR_PANELBG, 1);
   }
   push(ctx->container_stack, cnt);
   push_container_body(ctx, cnt, cnt->rect, opt);

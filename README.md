@@ -49,7 +49,9 @@ The library expects the user to provide input and handle the resultant drawing
 commands, it does not do any drawing itself.
 
 ## Contributing
-Pull requests adding additional functionality are welcome.
+Pull requests adding additional functionality are welcome, along bug requests.
+However, the new functionality **must require** to be directly implemented into the library.
+Functionality which can be implemented *easily* outside of MicroUI should not be contributed with.
 
 ## License
 This library is free software; you can redistribute it and/or modify it under
